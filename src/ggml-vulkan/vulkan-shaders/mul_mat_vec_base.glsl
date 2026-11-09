@@ -38,7 +38,18 @@ layout (push_constant) uniform parameter
     uint broadcast2;
     uint broadcast3;
 #endif
+#ifdef FUSE_RESULT_SCALE
+    float result_scale;
+#endif
 } p;
+
+#ifdef FUSE_RESULT_SCALE
+D_TYPE scaled_add_result(FLOAT_TYPE value, uint offset) {
+    precise float scaled = fma(float(value), p.result_scale, 0.0);
+    precise float result = scaled + float(data_fuse0[offset]);
+    return D_TYPE(result);
+}
+#endif
 
 #ifdef MUL_MAT_ID
 uint expert_id;
@@ -101,6 +112,10 @@ void reduce_result(inout FLOAT_TYPE temp[NUM_COLS][NUM_ROWS], const in uint32_t 
     if (tid == 0) {
         [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
             [[unroll]] for (uint n = 0; n < num_rows; ++n) {
+#ifdef FUSE_RESULT_SCALE
+                uint offset = j*p.batch_stride_d + d_offset + first_row + n;
+                data_d[offset] = scaled_add_result(temp[j][n], offset);
+#else
 #ifdef MUL_MAT_ID
                 if ((p.fusion_flags & MAT_VEC_FUSION_FLAGS_BIAS0) != 0) {
                     temp[j][n] += FLOAT_TYPE(data_fuse0[expert_id*p.stride_d + first_row + n]);
@@ -122,6 +137,7 @@ void reduce_result(inout FLOAT_TYPE temp[NUM_COLS][NUM_ROWS], const in uint32_t 
                 }
 #endif
                 data_d[j*p.batch_stride_d + d_offset + first_row + n] = D_TYPE(temp[j][n]);
+#endif
             }
         }
     }
@@ -156,6 +172,10 @@ void reduce_result(FLOAT_TYPE temp[NUM_COLS][NUM_ROWS], const in uint32_t d_offs
                 [[unroll]] for (uint s = 0; s < gl_NumSubgroups; ++s) {
                     temp[j][n] += tmpsh[j][n][s];
                 }
+#ifdef FUSE_RESULT_SCALE
+                uint offset = j*p.batch_stride_d + d_offset + first_row + n;
+                data_d[offset] = scaled_add_result(temp[j][n], offset);
+#else
 #ifdef MUL_MAT_ID
                 if ((p.fusion_flags & MAT_VEC_FUSION_FLAGS_BIAS0) != 0) {
                     temp[j][n] += FLOAT_TYPE(data_fuse0[expert_id*p.stride_d + first_row + n]);
@@ -177,6 +197,7 @@ void reduce_result(FLOAT_TYPE temp[NUM_COLS][NUM_ROWS], const in uint32_t d_offs
                 }
 #endif
                 data_d[j*p.batch_stride_d + d_offset + first_row + n] = D_TYPE(temp[j][n]);
+#endif
             }
         }
     }
@@ -201,6 +222,10 @@ void reduce_result(FLOAT_TYPE temp[NUM_COLS][NUM_ROWS], const in uint32_t d_offs
     if (tid == 0) {
         [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
             [[unroll]] for (uint n = 0; n < num_rows; ++n) {
+#ifdef FUSE_RESULT_SCALE
+                uint offset = j*p.batch_stride_d + d_offset + first_row + n;
+                data_d[offset] = scaled_add_result(tmpsh[j][n][0], offset);
+#else
 #ifdef MUL_MAT_ID
                 if ((p.fusion_flags & MAT_VEC_FUSION_FLAGS_BIAS0) != 0) {
                     tmpsh[j][n][0] += FLOAT_TYPE(data_fuse0[expert_id*p.stride_d + first_row + n]);
@@ -222,6 +247,7 @@ void reduce_result(FLOAT_TYPE temp[NUM_COLS][NUM_ROWS], const in uint32_t d_offs
                 }
 #endif
                 data_d[j*p.batch_stride_d + d_offset + first_row + n] = D_TYPE(tmpsh[j][n][0]);
+#endif
             }
         }
     }
